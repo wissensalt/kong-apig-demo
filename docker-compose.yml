@@ -1,0 +1,105 @@
+version: '3.9'
+
+volumes:
+  kong_data: {}
+
+networks:
+  kong-net:
+
+services:
+  #######################################
+  # Postgres: The database used by Kong
+  #######################################
+  kong_database:
+    image: postgres:9.6.24-alpine3.15
+    ports:
+      - 5432:5432
+    networks:
+      - kong-net
+    environment:
+      POSTGRES_USER: kong_user
+      POSTGRES_PASSWORD: kong_password
+      POSTGRES_DB: kong_db
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "kong_user"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+
+  #######################################
+  # Kong database migration
+  #######################################
+  kong_migration:
+    image: kong:2.7.2-alpine
+    command: kong migrations bootstrap
+    networks:
+      - kong-net
+    restart: on-failure
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong_database
+      KONG_PG_DATABASE: kong_db
+      KONG_PG_USER: kong_user
+      KONG_PG_PASSWORD: kong_password
+    depends_on:
+      - kong_database
+
+  #######################################
+  # Kong: The API Gateway
+  #######################################
+  kong:
+    image: kong:2.7.2-alpine
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8443:8443"
+      - "8444:8444"
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong_database
+      KONG_PG_DATABASE: kong_db
+      KONG_PG_USER: kong_user
+      KONG_PG_PASSWORD: kong_password
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_PROXY_LISTEN_SSL: 0.0.0.0:8443
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    depends_on:
+      - kong_database
+      - kong_migration
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  #######################################
+  # Konga database prepare
+  #######################################
+#  konga-prepare:
+#    image: pantsel/konga:latest
+#    command: "-c prepare -a postgres -u postgresql://kong_user:kong_password@kong_database:5432/konga"
+#    networks:
+#      - kong-net
+#    restart: on-failure
+#    depends_on:
+#      - kong_database
+
+  #######################################
+  # Konga: Kong GUI
+  #######################################
+#  konga:
+#    image: pantsel/konga:latest
+#    restart: always
+#    networks:
+#      - kong-net
+#    environment:
+#      DB_ADAPTER: postgres
+#      DB_URI: postgresql://user:password@kong_db:5432/konga
+#      NODE_ENV: production
+#    depends_on:
+#      - kong_db
+#    ports:
+#      - "1337:1337"
+
+# Reference: https://docs.konghq.com/gateway/latest/install-and-run/docker/
